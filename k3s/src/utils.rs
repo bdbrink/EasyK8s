@@ -51,21 +51,3 @@ pub fn apply_manifest(manifest: &str) -> Result<()> {
     
     Ok(())
 }
-
-pub fn run_silent(cmd: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .with_context(|| format!("failed to run: {} {:?}", cmd, args))?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "Command failed: {} {:?}\nstderr: {}",
-            cmd,
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
