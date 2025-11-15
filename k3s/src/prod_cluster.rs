@@ -907,30 +907,21 @@ spec:
     Ok(())
 }
 
-fn print_access_info() {
-    println!("\n" + "=".repeat(60));
-    println!("🎯 Access Information:");
-    println!("{}", "=".repeat(60));
+fn print_access_info(cluster_name: &str) {
+    let separator = "=".repeat(60);
+    println!("\n{}", separator);
+    println!("🎯 Access Information for '{}':", cluster_name);
+    println!("{}", separator);
     println!("\n📊 Monitoring:");
     println!("  Prometheus: http://localhost:9090");
     println!("  Grafana:    http://localhost:3000 (admin/admin)");
-    println!("\n📝 Logging:");
-    println!("  Kibana:     http://localhost:5601");
     println!("\n🔄 GitOps:");
     println!("  ArgoCD:     http://localhost:8080");
-    println!("  Username:   admin");
-    println!("  Password:   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=\"{{.data.password}}\" | base64 -d");
-    println!("\n🌐 Sample App:");
-    println!("  Add to /etc/hosts: 127.0.0.1 nginx.local");
-    println!("  Then visit: http://nginx.local");
     println!("\n🔍 Useful Commands:");
-    println!("  kubectl get pods -A                    # View all pods");
-    println!("  kubectl top nodes                      # Node resource usage");
-    println!("  kubectl get events -A --sort-by='.lastTimestamp'");
-    println!("  k9s                                    # Terminal UI (if installed)");
-    println!("\n🧹 Cleanup:");
-    println!("  k3d cluster delete prod-like-cluster");
-    println!("\n" + "=".repeat(60));
+    println!("  kubectl get pods -A");
+    println!("  kubectl config use-context k3d-{}", cluster_name);
+    println!("  k3d cluster delete {}", cluster_name);
+    println!("\n{}", separator);
 }
 
 fn apply_manifest(manifest: &str) -> Result<()> {
