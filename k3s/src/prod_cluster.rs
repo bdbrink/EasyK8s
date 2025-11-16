@@ -1,50 +1,62 @@
+// prod_cluster.rs
 use anyhow::{Context, Result};
-use std::process::Command;
 use std::time::Duration;
 use tokio::time::sleep;
 use std::fs;
+use crate::utils;  // Import the utils module!
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cluster_name = "prod-like-cluster";
-    
-    println!("🚀 Building production-like k3d cluster...");
-    println!("📋 This will include:");
-    println!("   - Multi-node HA control plane (3 servers)");
-    println!("   - Worker nodes (3 agents)");
-    println!("   - Ingress controller (Traefik)");
-    println!("   - Cert-manager for TLS");
-    println!("   - Prometheus + Grafana monitoring");
-    println!("   - EFK stack (Elasticsearch, Fluentd, Kibana)");
-    println!("   - ArgoCD for GitOps");
-    println!("   - Network policies");
-    println!("   - Resource quotas & limits");
-    println!("   - RBAC policies\n");
+// Make these PUBLIC so main.rs can use them!
+pub struct ProdClusterConfig {
+    pub name: String,
+    pub servers: u8,
+    pub agents: u8,
+    pub install_monitoring: bool,
+    pub install_logging: bool,
+    pub install_argocd: bool,
+}
+
+pub async fn create_prod_cluster(config: ProdClusterConfig) -> Result<()> {
+    println!("🚀 Building production-like k3d cluster: {}", config.name);
+    println!("📋 Configuration:");
+    println!("   Control Plane Nodes: {}", config.servers);
+    println!("   Worker Nodes: {}", config.agents);
+    println!("   Monitoring: {}", if config.install_monitoring { "✓" } else { "✗" });
+    println!("   Logging: {}", if config.install_logging { "✓" } else { "✗" });
+    println!("   ArgoCD: {}", if config.install_argocd { "✓" } else { "✗" });
 
     // Create k3d config file
-    create_k3d_config()?;
+    create_k3d_config(&config)?;
     
     // Create the cluster with custom config
-    println!("🏗️  Creating HA cluster...");
-    run("k3d", &[
-        "cluster", "create", cluster_name,
-        "--config", "/tmp/k3d-config.yaml",
+    println!("\n🏗️  Creating HA cluster...");
+    utils::run("k3d", &[
+        "cluster", "create", &config.name,
+        "--config", "/tmp/k3d-prod-config.yaml",
     ])?;
 
     println!("✅ Cluster created! Waiting for nodes...");
     sleep(Duration::from_secs(10)).await;
 
     // Verify cluster health
-    run("kubectl", &["get", "nodes", "-o", "wide"])?;
+    utils::run("kubectl", &["get", "nodes", "-o", "wide"])?;
     
     println!("\n📦 Installing production components...");
     
     // Install core infrastructure
     install_cert_manager().await?;
     install_ingress_controller().await?;
-    install_monitoring_stack().await?;
-    install_logging_stack().await?;
-    install_argocd().await?;
+    
+    if config.install_monitoring {
+        install_monitoring_stack().await?;
+    }
+    
+    if config.install_logging {
+        install_logging_stack().await?;
+    }
+    
+    if config.install_argocd {
+        install_argocd().await?;
+    }
     
     // Setup namespaces and policies
     setup_namespaces()?;
@@ -55,23 +67,22 @@ async fn main() -> Result<()> {
     // Deploy sample applications
     deploy_sample_apps().await?;
 
-    println!("\n🎉 Production-like cluster is ready!");
-    print_access_info(cluster_name);
+    println!("\n🎉 Production-like cluster '{}' is ready!", config.name);
+    print_access_info(&config.name);
     
     Ok(())
 }
 
-fn create_k3d_config() -> Result<()> {
-    let config = r#"
+fn create_k3d_config(config: &ProdClusterConfig) -> Result<()> {
+    let yaml_config = format!(r#"
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
-  name: prod-like-cluster
-servers: 3  # HA control plane
-agents: 3   # Worker nodes
+  name: {}
+servers: {}
+agents: {}
 image: rancher/k3s:v1.28.5-k3s1
 
-# Port mappings for services
 ports:
   - port: 80:80
     nodeFilters:
@@ -79,48 +90,42 @@ ports:
   - port: 443:443
     nodeFilters:
       - loadbalancer
-  - port: 9090:9090  # Prometheus
+  - port: 9090:9090
     nodeFilters:
       - loadbalancer
-  - port: 3000:3000  # Grafana
+  - port: 3000:3000
     nodeFilters:
       - loadbalancer
-  - port: 8080:8080  # ArgoCD
+  - port: 8080:8080
     nodeFilters:
       - loadbalancer
 
-# Volume mounts for persistence
 volumes:
   - volume: /tmp/k3d-storage:/var/lib/rancher/k3s/storage
     nodeFilters:
       - all
 
-# Registry for local image development
 registries:
   create:
     name: registry.localhost
     host: "0.0.0.0"
     hostPort: "5000"
 
-# Options for k3s
 options:
   k3s:
     extraArgs:
-      - arg: --disable=traefik  # We'll install our own ingress
+      - arg: --disable=traefik
         nodeFilters:
           - server:*
       - arg: --disable=servicelb
         nodeFilters:
           - server:*
-      - arg: --kube-apiserver-arg=enable-admission-plugins=NodeRestriction,PodSecurityPolicy
-        nodeFilters:
-          - server:*
   kubeconfig:
     updateDefaultKubeconfig: true
     switchCurrentContext: true
-"#;
+"#, config.name, config.servers, config.agents);
 
-    fs::write("/tmp/k3d-config.yaml", config)
+    fs::write("/tmp/k3d-prod-config.yaml", yaml_config)
         .context("Failed to write k3d config")?;
     
     println!("✅ Created k3d configuration");
@@ -130,22 +135,20 @@ options:
 async fn install_cert_manager() -> Result<()> {
     println!("\n🔐 Installing cert-manager...");
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "apply", "-f",
         "https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.yaml"
     ])?;
     
-    // Wait for cert-manager to be ready
     sleep(Duration::from_secs(30)).await;
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "wait", "--for=condition=ready", "pod",
         "-l", "app.kubernetes.io/instance=cert-manager",
         "-n", "cert-manager",
         "--timeout=300s"
     ])?;
     
-    // Create self-signed issuer for local development
     let issuer = r#"
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -179,7 +182,7 @@ spec:
     secretName: local-ca-secret
 "#;
     
-    apply_manifest(issuer)?;
+    utils::apply_manifest(issuer)?;
     println!("✅ Cert-manager installed with local CA");
     Ok(())
 }
@@ -187,14 +190,14 @@ spec:
 async fn install_ingress_controller() -> Result<()> {
     println!("\n🌐 Installing NGINX Ingress Controller...");
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "apply", "-f",
         "https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.4/deploy/static/provider/cloud/deploy.yaml"
     ])?;
     
     sleep(Duration::from_secs(20)).await;
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "wait", "--namespace", "ingress-nginx",
         "--for=condition=ready", "pod",
         "--selector=app.kubernetes.io/component=controller",
@@ -208,10 +211,7 @@ async fn install_ingress_controller() -> Result<()> {
 async fn install_monitoring_stack() -> Result<()> {
     println!("\n📊 Installing Prometheus + Grafana...");
     
-    // Create monitoring namespace
-    run("kubectl", &["create", "namespace", "monitoring"])?;
-    
-    // Install kube-prometheus-stack via manifests
+    // Keep your full monitoring manifest here
     let monitoring = r#"
 apiVersion: v1
 kind: Namespace
@@ -393,7 +393,7 @@ spec:
   type: LoadBalancer
 "#;
     
-    apply_manifest(monitoring)?;
+    utils::apply_manifest(monitoring)?;
     
     sleep(Duration::from_secs(15)).await;
     println!("✅ Monitoring stack installed");
@@ -403,6 +403,7 @@ spec:
 async fn install_logging_stack() -> Result<()> {
     println!("\n📝 Installing EFK (Elasticsearch, Fluentd, Kibana)...");
     
+    // Keep your full logging manifest
     let logging = r#"
 apiVersion: v1
 kind: Namespace
@@ -559,7 +560,7 @@ spec:
   type: LoadBalancer
 "#;
     
-    apply_manifest(logging)?;
+    utils::apply_manifest(logging)?;
     println!("✅ Logging stack installed");
     Ok(())
 }
@@ -567,26 +568,25 @@ spec:
 async fn install_argocd() -> Result<()> {
     println!("\n🔄 Installing ArgoCD...");
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "create", "namespace", "argocd"
     ])?;
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "apply", "-n", "argocd", "-f",
         "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
     ])?;
     
     sleep(Duration::from_secs(30)).await;
     
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "wait", "--namespace", "argocd",
         "--for=condition=ready", "pod",
         "--selector=app.kubernetes.io/name=argocd-server",
         "--timeout=300s"
     ])?;
     
-    // Patch ArgoCD server to be LoadBalancer
-    run("kubectl", &[
+    utils::run("kubectl", &[
         "patch", "svc", "argocd-server",
         "-n", "argocd",
         "-p", r#"{"spec": {"type": "LoadBalancer"}}"#
@@ -622,7 +622,7 @@ metadata:
     environment: development
 "#;
     
-    apply_manifest(namespaces)?;
+    utils::apply_manifest(namespaces)?;
     println!("✅ Namespaces created");
     Ok(())
 }
@@ -672,7 +672,7 @@ spec:
           name: ingress-nginx
 "#;
     
-    apply_manifest(policies)?;
+    utils::apply_manifest(policies)?;
     println!("✅ Network policies applied");
     Ok(())
 }
@@ -716,7 +716,7 @@ spec:
     type: Container
 "#;
     
-    apply_manifest(quotas)?;
+    utils::apply_manifest(quotas)?;
     println!("✅ Resource quotas set");
     Ok(())
 }
@@ -784,7 +784,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 "#;
     
-    apply_manifest(rbac)?;
+    utils::apply_manifest(rbac)?;
     println!("✅ RBAC policies configured");
     Ok(())
 }
@@ -900,7 +900,7 @@ spec:
         averageUtilization: 70
 "#;
     
-    apply_manifest(apps)?;
+    utils::apply_manifest(apps)?;
     
     sleep(Duration::from_secs(10)).await;
     println!("✅ Sample apps deployed");
@@ -915,63 +915,17 @@ fn print_access_info(cluster_name: &str) {
     println!("\n📊 Monitoring:");
     println!("  Prometheus: http://localhost:9090");
     println!("  Grafana:    http://localhost:3000 (admin/admin)");
+    println!("\n📝 Logging:");
+    println!("  Kibana:     http://localhost:5601");
     println!("\n🔄 GitOps:");
     println!("  ArgoCD:     http://localhost:8080");
+    println!("  Password:   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=\"{{.data.password}}\" | base64 -d");
+    println!("\n🌐 Sample App:");
+    println!("  Add to /etc/hosts: 127.0.0.1 nginx.local");
+    println!("  Then visit: http://nginx.local");
     println!("\n🔍 Useful Commands:");
     println!("  kubectl get pods -A");
     println!("  kubectl config use-context k3d-{}", cluster_name);
     println!("  k3d cluster delete {}", cluster_name);
     println!("\n{}", separator);
-}
-
-fn apply_manifest(manifest: &str) -> Result<()> {
-    use std::io::Write;
-    
-    let mut child = Command::new("kubectl")
-        .args(&["apply", "-f", "-"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .context("Failed to spawn kubectl")?;
-    
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(manifest.as_bytes())
-            .context("Failed to write manifest to kubectl stdin")?;
-    }
-    
-    let output = child.wait_with_output()
-        .context("Failed to wait for kubectl")?;
-    
-    if !output.status.success() {
-        anyhow::bail!(
-            "kubectl apply failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    
-    Ok(())
-}
-
-fn run(cmd: &str, args: &[&str]) -> Result<()> {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .with_context(|| format!("failed to run: {} {:?}", cmd, args))?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "Command failed: {} {:?}\nstderr: {}",
-            cmd,
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        println!("{}", stdout);
-    }
-    
-    Ok(())
 }
