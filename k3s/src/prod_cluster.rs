@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
     deploy_sample_apps().await?;
 
     println!("\n🎉 Production-like cluster is ready!");
-    print_access_info();
+    print_access_info(cluster_name);
     
     Ok(())
 }
