@@ -1,0 +1,94 @@
+# Grafana settings
+grafana:
+  enabled: true
+  adminPassword: admin
+  
+  service:
+    type: LoadBalancer
+    port: 3000
+    
+  # Pre-configured dashboards
+  defaultDashboardsEnabled: true
+  
+  # Data sources
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki:3100
+      access: proxy
+      
+  # Persistent storage
+  persistence:
+    enabled: false  # Set to true for production
+    size: 10Gi
+
+# Prometheus settings
+prometheus:
+  enabled: true
+  
+  prometheusSpec:
+    # Retention
+    retention: 7d
+    retentionSize: "10GB"
+    
+    # Storage
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    
+    # Resources
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    
+    # Service monitors - scrape all namespaces
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    
+  service:
+    type: LoadBalancer
+    port: 9090
+
+# AlertManager settings
+alertmanager:
+  enabled: true
+  
+  service:
+    type: ClusterIP
+    
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+# Node exporter - monitors node metrics
+nodeExporter:
+  enabled: true
+
+# Kube-state-metrics - monitors k8s objects
+kubeStateMetrics:
+  enabled: true
+
+# Prometheus operator
+prometheusOperator:
+  enabled: true
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
