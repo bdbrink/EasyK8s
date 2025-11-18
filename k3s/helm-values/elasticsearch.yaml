@@ -1,0 +1,27 @@
+# Single node for development
+replicas: 1
+minimumMasterNodes: 1
+
+# Java heap size
+esJavaOpts: "-Xmx512m -Xms512m"
+
+# Resources
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Volume claim
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+
+# Security disabled for local dev
+xpack:
+  security:
+    enabled: false
