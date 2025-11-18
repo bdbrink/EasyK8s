@@ -1,0 +1,39 @@
+replicaCount: 3
+
+image:
+  repository: nginx
+  tag: alpine
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "local-ca-issuer"
+  hosts:
+    - host: nginx.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nginx-tls
+      hosts:
+        - nginx.local

@@ -1,0 +1,23 @@
+# Elasticsearch connection
+elasticsearchHosts: "http://elasticsearch-master:9200"
+
+# Service configuration
+service:
+  type: LoadBalancer
+  port: 5601
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Kibana config
+kibanaConfig:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    elasticsearch.hosts: [ "http://elasticsearch-master:9200" ]
